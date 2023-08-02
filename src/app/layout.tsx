@@ -1,11 +1,11 @@
 import './globals.css'
-import { Inter } from 'next/font/google'
+import { Inter, Merriweather } from 'next/font/google'
 
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata = {
-  title: 'Mint Demo by Porcupine Playground Pals',
-  description: 'Porcupine Playground Pals is a Solana NFT collection donating proceeds to causes that promote play for kids or support lung cancer patients and families. This is a Demo starter project (mintui-cmv3v2-starter).',
+  title: 'What Have You Found?',
+  description: 'Fractured Apes Puzzle',
   robots: 'noindex'
 }
 
@@ -16,7 +16,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={inter.className}>{children}</body>
+      <body>{children}</body>
     </html>
   )
 }

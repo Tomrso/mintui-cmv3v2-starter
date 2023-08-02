@@ -2,6 +2,7 @@
 
 import Image from 'next/image'
 import styles from './page.module.css'
+import { Merriweather, Merriweather_Sans } from 'next/font/google';
 
 import dynamic from 'next/dynamic';
 import { useEffect, useMemo, useState } from "react";
@@ -9,11 +10,12 @@ import { useEffect, useMemo, useState } from "react";
 import { WalletAdapterNetwork } from "@solana/wallet-adapter-base";
 import { WalletProvider, useWallet } from "@solana/wallet-adapter-react";
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
-import { LedgerWalletAdapter, SolflareWalletAdapter} from "@solana/wallet-adapter-wallets";
+import { LedgerWalletAdapter, SolflareWalletAdapter } from "@solana/wallet-adapter-wallets";
 import "@solana/wallet-adapter-react-ui/styles.css";
 
 import { createUmi } from "@metaplex-foundation/umi-bundle-defaults";
-import { base58PublicKey,
+import {
+  base58PublicKey,
   generateSigner,
   Option,
   PublicKey,
@@ -27,21 +29,27 @@ import { base58PublicKey,
 import { walletAdapterIdentity } from "@metaplex-foundation/umi-signer-wallet-adapters";
 import { setComputeUnitLimit } from '@metaplex-foundation/mpl-essentials';
 import { mplTokenMetadata, TokenStandard } from "@metaplex-foundation/mpl-token-metadata";
-import { mplCandyMachine, 
-  fetchCandyMachine, 
-  mintV2, 
-  safeFetchCandyGuard, 
-  DefaultGuardSetMintArgs, 
-  DefaultGuardSet, 
-  SolPayment, 
-  CandyMachine, 
-  CandyGuard } from "@metaplex-foundation/mpl-candy-machine";
+import {
+  mplCandyMachine,
+  fetchCandyMachine,
+  mintV2,
+  safeFetchCandyGuard,
+  DefaultGuardSetMintArgs,
+  DefaultGuardSet,
+  SolPayment,
+  CandyMachine,
+  CandyGuard,
+  MintLimitArgs
+} from "@metaplex-foundation/mpl-candy-machine";
+import { Connection, TokenAmount, clusterApiUrl } from '@solana/web3.js';
+import { getMango } from './getMango';
+
+const merriweather = Merriweather({ weight: "700", subsets: ["latin"] })
+const merriweatherSans = Merriweather_Sans({ weight: "400", subsets: ["latin"] })
 
 export default function Home() {
 
-  const network = process.env.NEXT_PUBLIC_NETWORK === 'devnet' ? WalletAdapterNetwork.Devnet :
-    process.env.NEXT_PUBLIC_NETWORK === 'testnet' ? WalletAdapterNetwork.Testnet :
-    WalletAdapterNetwork.Mainnet;
+  const network = WalletAdapterNetwork.Mainnet;
 
   const endpoint = `https://${process.env.NEXT_PUBLIC_RPC_URL}`;
 
@@ -71,9 +79,9 @@ export default function Home() {
   const [costInSol, setCostInSol] = useState<number>(0);
   const [cmv3v2, setCandyMachine] = useState<CandyMachine>();
   const [defaultCandyGuardSet, setDefaultCandyGuardSet] = useState<CandyGuard<DefaultGuardSet>>();
-  const [countTotal, setCountTotal] = useState<number>();
-  const [countRemaining, setCountRemaining] = useState<number>();
-  const [countMinted, setCountMinted] = useState<number>();
+  const [countTotal, setCountTotal] = useState<number>(0);
+  const [countRemaining, setCountRemaining] = useState<number>(0);
+  const [countMinted, setCountMinted] = useState<number>(0);
   const [mintDisabled, setMintDisabled] = useState<boolean>(true);
 
   // retrieve item counts to determine availability and
@@ -92,27 +100,14 @@ export default function Home() {
     setCountMinted(Number(candyMachine.itemsRedeemed));
     const remaining = candyMachine.itemsLoaded - Number(candyMachine.itemsRedeemed)
     setCountRemaining(remaining);
-    
+    console.log(candyMachine.itemsRedeemed)
+
     // Get cost
     const candyGuard = await safeFetchCandyGuard(umi, candyMachine.mintAuthority);
     if (candyGuard) {
       setDefaultCandyGuardSet(candyGuard);
     }
     const defaultGuards: DefaultGuardSet | undefined = candyGuard?.guards;
-    const solPaymentGuard: Option<SolPayment> | undefined = defaultGuards?.solPayment;
-
-    if (solPaymentGuard) {
-      const solPayment: SolPayment | null  = unwrapSome(solPaymentGuard);
-      if (solPayment) {
-        const lamports: SolAmount = solPayment.lamports;
-        const solCost = Number(lamports.basisPoints) / 1000000000;
-        setCostInSol(solCost);
-      }
-    }
-
-    if (remaining > 0) {
-      setMintDisabled(false);
-    }
   };
 
   useEffect(() => {
@@ -125,78 +120,65 @@ export default function Home() {
     const wallet = useWallet();
     umi = umi.use(walletAdapterIdentity(wallet));
 
-    // check wallet balance
-    const checkWalletBalance = async () => {
-      const balance: SolAmount = await umi.rpc.getBalance(umi.identity.publicKey);
-      if (Number(balance.basisPoints) / 1000000000 < costInSol) {
-        setMintMsg("Add more SOL to your wallet.");
-        setMintDisabled(true);
+    const checkMango = async () => {
+      let mango = await getMango(wallet.publicKey)
+      if (mango && mango >= 250 && countRemaining > 0) {
+        setMintDisabled(false);
+        setMintMsg(undefined)
       } else {
-        if (countRemaining !== undefined && countRemaining > 0) {
-          setMintDisabled(false);
-        }
+        setMintDisabled(true)
+        setMintMsg("not enough mango")
       }
-    };
-  
+    }
+
+    checkMango()
+
     if (!wallet.connected) {
       return <p>Please connect your wallet.</p>;
-    } 
-
-    checkWalletBalance();
+    }
 
     const mintBtnHandler = async () => {
-  
+
       if (!cmv3v2 || !defaultCandyGuardSet) {
         setMintMsg("There was an error fetching the candy machine. Try refreshing your browser window.");
         return;
       }
-      setLoading(true);
-      setMintMsg(undefined);
-  
+      setLoading(true);;
+
       try {
         const candyMachine = cmv3v2;
         const candyGuard = defaultCandyGuardSet;
-  
+        console.log(candyGuard)
+
         const nftSigner = generateSigner(umi);
-        
+
         const mintArgs: Partial<DefaultGuardSetMintArgs> = {};
-  
-        // solPayment has mintArgs
-        const defaultGuards: DefaultGuardSet | undefined = candyGuard?.guards;
-        const solPaymentGuard: Option<SolPayment> | undefined = defaultGuards?.solPayment;
-        if (solPaymentGuard) {
-          const solPayment: SolPayment | null  = unwrapSome(solPaymentGuard);
-          if (solPayment) {
-            const treasury = solPayment.destination;
-  
-            mintArgs.solPayment = some({
-              destination: treasury
-            });
-          }
-        }
-        
+
+        mintArgs.mintLimit = candyGuard.guards.mintLimit
+        mintArgs.tokenPayment = candyGuard.guards.tokenPayment
+
         const tx = transactionBuilder()
           .add(setComputeUnitLimit(umi, { units: 600_000 }))
           .add(mintV2(umi, {
             candyMachine: candyMachine.publicKey,
-            collectionMint: candyMachine.collectionMint, 
-            collectionUpdateAuthority: candyMachine.authority, 
+            collectionMint: candyMachine.collectionMint,
+            collectionUpdateAuthority: candyMachine.authority,
             nftMint: nftSigner,
             candyGuard: candyGuard?.publicKey,
             mintArgs: mintArgs,
             tokenStandard: TokenStandard.ProgrammableNonFungible
           }))
-  
-  
+
+
         const { signature } = await tx.sendAndConfirm(umi, {
           confirm: { commitment: "finalized" }, send: {
             skipPreflight: true,
           },
         });
-  
+
         setMintCreated(nftSigner.publicKey);
         setMintMsg("Mint was successful!");
-  
+
       } catch (err: any) {
         console.error(err);
         setMintMsg(err.message);
@@ -204,12 +186,12 @@ export default function Home() {
         setLoading(false);
       }
     };
-  
+
     if (mintCreated) {
       return (
         <a className={styles.success} target="_blank" rel="noreferrer"
-          href={`https://solscan.io/token/${base58PublicKey(mintCreated)}${network === 'devnet' ? '?cluster=devnet' : ''}`}>
-          <Image className={styles.logo} src="/nftHolder.png" alt="Blank NFT" width={300} height={300} priority/>
+          href={`https://solscan.io/token/${base58PublicKey(mintCreated)}`}>
+          <p>Enjoy Your Prize!</p>
           <p className="mintAddress">
             <code>{base58PublicKey(mintCreated)}</code>
           </p>
@@ -218,12 +200,20 @@ export default function Home() {
     }
 
     return (
-      <>          
+      <>
         <button onClick={mintBtnHandler} className={styles.mintBtn} disabled={mintDisabled || loading}>
-          MINT<br/>({costInSol} SOL)
+
+
+          <><span style={{ fontWeight: "bold", fontSize: "20px" }} className={merriweatherSans.className}>
+            MINT
+          </span>
+            <span style={{ fontWeight: "100", fontSize: "14px" }}>
+              (250 MANGO)
+            </span></>
+
         </button>
         {loading && (<div className={styles.loadingDots}>. . .</div>)}
-      </> 
+      </>
     );
   }; // </Mint>
 
@@ -231,22 +221,27 @@ export default function Home() {
     <WalletProvider wallets={wallets} autoConnect>
       <WalletModalProvider>
         <main className={styles.main}>
-          <WalletMultiButtonDynamic/>
-        
-          <h1>Mint Demo by <a href="https://porcupineplaygroundpals.com/how-to-create-a-minting-ui-for-collection-deployed-with-metaplexs-sugar-2-1-1/" target="_blank" rel="noreferrer">Porcupine Playground Pals</a></h1>
-          
-          <Image className={styles.logo} src="/preview.gif" alt="Preview of NFTs" width={300} height={300} priority/>
+          <WalletMultiButtonDynamic />
+          <div className={styles.headings}>
+            <h1 className={merriweather.className} style={{ padding: "20px", fontSize: "40px" }}>The Riddler Mask</h1>
+            <p className={merriweatherSans.className}>Congratulations brave FAPE. You have solved the puzzle and found the riddler mask. <br></br>Try it on and see what other mysteries you can solve......</p>
+          </div>
+          <Image className={styles.logo} src="/riddlerMask.png" alt="Preview of NFTs" width={300} height={300} priority />
 
           <div className={styles.countsContainer}>
-            <div>Minted: {countMinted} / {countTotal}</div>
-            <div>Remaining: {countRemaining}</div>
+            <div className={merriweatherSans.className}>Masks Minted: {countMinted - 1} / {countTotal - 1}</div>
+            <div className={styles.progress}>
+              <div className={styles.progressInner} style={{ width: `${countMinted -1 }%` }}>
+              </div>
+            </div>
+
           </div>
-          <Mint/>
+          <Mint />
           {mintMsg && (
             <div className={styles.mintMsg}>
-              <button className={styles.mintMsgClose} onClick={() => {setMintMsg(undefined);}}>&times;</button>
+              <button className={styles.mintMsgClose} onClick={() => { setMintMsg(undefined); }}>&times;</button>
               <span>{mintMsg}</span>
-            </div>)} 
+            </div>)}
         </main>
       </WalletModalProvider>
     </WalletProvider>
