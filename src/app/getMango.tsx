@@ -3,17 +3,16 @@ import { Connection, TokenAmount, clusterApiUrl, PublicKey,  } from '@solana/web
 
 
 export const getMango = async (owner: any) => {
-const connection = new Connection(`https://${process.env.NEXT_PUBLIC_RPC_URL}`, "confirmed")
-let mango
-try {
+    const connection = new Connection(`https://${process.env.NEXT_PUBLIC_RPC_URL}`, "confirmed")
+    let mango
+    let tokenAccount
     const tokenAccountInfo = await connection.getTokenAccountsByOwner(owner, {mint: new PublicKey("8ZKGnRpnM1BVN9SGBuJaXSf1cHwQ2fWUvPpXWoMWT31C"), programId: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")})
-    const tokenAccount = tokenAccountInfo.value[0].pubkey.toString()
+    if (tokenAccountInfo.value.length > 0) {
+        tokenAccount = tokenAccountInfo.value[0].pubkey.toString()
+        const accountInfo = await connection.getTokenAccountBalance(new PublicKey(tokenAccount))
+        mango = accountInfo.value.uiAmount
+    } else mango = 0
     // console.log(tokenAccount)
-    const accountInfo = await connection.getTokenAccountBalance(new PublicKey(tokenAccount))
-    mango = accountInfo.value.uiAmount
-} catch {
-    mango = 0
-}
     // console.log(mango)
     return mango
 }

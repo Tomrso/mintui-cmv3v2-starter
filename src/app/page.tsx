@@ -3,6 +3,10 @@
 import Image from 'next/image'
 import styles from './page.module.css'
 import { Merriweather, Merriweather_Sans } from 'next/font/google';
+import {
+  fetchToken,
+  findAssociatedTokenPda,
+} from "@metaplex-foundation/mpl-toolbox";
 
 import dynamic from 'next/dynamic';
 import { useEffect, useMemo, useState } from "react";
@@ -21,6 +25,7 @@ import {
   PublicKey,
   publicKey,
   SolAmount,
+  Some,
   some,
   transactionBuilder,
   Umi,
@@ -39,7 +44,10 @@ import {
   SolPayment,
   CandyMachine,
   CandyGuard,
-  MintLimitArgs
+  MintLimitArgs,
+  safeFetchMintCounterFromSeeds,
+  MintLimit,
+  GuardSet
 } from "@metaplex-foundation/mpl-candy-machine";
 import { Connection, TokenAmount, clusterApiUrl } from '@solana/web3.js';
 import { getMango } from './getMango';
@@ -60,7 +68,6 @@ export default function Home() {
     ],
     [network]
   );
-
   const WalletMultiButtonDynamic = dynamic(
     async () =>
       (await import("@solana/wallet-adapter-react-ui")).WalletMultiButton,
@@ -76,16 +83,13 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [mintCreated, setMintCreated] = useState<PublicKey | null>(null);
   const [mintMsg, setMintMsg] = useState<string>();
-  const [costInSol, setCostInSol] = useState<number>(0);
   const [cmv3v2, setCandyMachine] = useState<CandyMachine>();
-  const [defaultCandyGuardSet, setDefaultCandyGuardSet] = useState<CandyGuard<DefaultGuardSet>>();
+  const [candyGuard, setCandyGuard] = useState<any>();
   const [countTotal, setCountTotal] = useState<number>(0);
   const [countRemaining, setCountRemaining] = useState<number>(0);
   const [countMinted, setCountMinted] = useState<number>(0);
-  const [mintDisabled, setMintDisabled] = useState<boolean>(true);
 
   // retrieve item counts to determine availability and
-  // from the solPayment, display cost on the Mint button
   const retrieveAvailability = async () => {
     const cmId = process.env.NEXT_PUBLIC_CANDY_MACHINE_ID;
     if (!cmId) {
@@ -100,14 +104,42 @@ export default function Home() {
     setCountMinted(Number(candyMachine.itemsRedeemed));
     const remaining = candyMachine.itemsLoaded - Number(candyMachine.itemsRedeemed)
     setCountRemaining(remaining);
-    console.log(candyMachine.itemsRedeemed)
-
     // Get cost
     const candyGuard = await safeFetchCandyGuard(umi, candyMachine.mintAuthority);
     if (candyGuard) {
-      setDefaultCandyGuardSet(candyGuard);
+      setCandyGuard(candyGuard);
     }
-    const defaultGuards: DefaultGuardSet | undefined = candyGuard?.guards;
+  };
+
+  //Checks how many NFTs a user has minted
+  const mintLimitChecker = async (
+    umi: Umi,
+    candyMachine: CandyMachine,
+    guard: {
+      label: string;
+      guards: GuardSet;
+  }
+  ) => {
+    const mintLimit = guard.guards.mintLimit as Some<MintLimit>;
+  
+    //not minted yet
+    try {
+      const mintCounter = await safeFetchMintCounterFromSeeds(umi, {
+        id: mintLimit.value.id,
+        user: umi.identity.publicKey,
+        candyMachine: candyMachine.publicKey,
+        candyGuard: candyMachine.mintAuthority,
+      });
+  
+      if (mintCounter && mintCounter.count >= mintLimit.value.limit) {
+        return false;
+      }
+  
+      return true;
+    } catch (error) {
+      console.error(`mintLimitChecker: ${error}`);
+      return false;
+    }
   };
 
   useEffect(() => {
@@ -120,34 +152,46 @@ export default function Home() {
     const wallet = useWallet();
     umi = umi.use(walletAdapterIdentity(wallet));
 
-    const checkMango = async () => {
+    // Checks mango balance
+    const checkMango = async (wallet: any) => {
       let mango = await getMango(wallet.publicKey)
-      if (mango && mango >= 250 && countRemaining > 0) {
-        setMintDisabled(false);
-        setMintMsg(undefined)
+      console.log(mango)
+      if (mango && mango >= 250) {
+        return true
       } else {
-        setMintDisabled(true)
-        setMintMsg("not enough mango")
+        return false
       }
     }
-
-    checkMango()
 
     if (!wallet.connected) {
       return <p>Please connect your wallet.</p>;
     }
 
     const mintBtnHandler = async () => {
-
-      if (!cmv3v2 || !defaultCandyGuardSet) {
+      if (!cmv3v2 || !candyGuard) {
         setMintMsg("There was an error fetching the candy machine. Try refreshing your browser window.");
         return;
+      }
+      if (await mintLimitChecker(umi, cmv3v2, candyGuard)) {
+        setMintMsg(undefined)
+      } else {
+        setMintMsg("Mint Limit Reached, 1 Per Wallet")
+        return
+      }
+      if (await checkMango(wallet)) {
+        setMintMsg(undefined)
+      } else {
+        setMintMsg("Not Enough Mango")
+        return
+      }
+      if (countRemaining <= 0) {
+        setMintMsg("Sorry, No More Left!")
+        return
       }
       setLoading(true);;
 
       try {
         const candyMachine = cmv3v2;
-        const candyGuard = defaultCandyGuardSet;
         console.log(candyGuard)
 
         const nftSigner = generateSigner(umi);
@@ -201,7 +245,7 @@ export default function Home() {
 
     return (
       <>
-        <button onClick={mintBtnHandler} className={styles.mintBtn} disabled={mintDisabled || loading}>
+        <button onClick={mintBtnHandler} className={styles.mintBtn} disabled={loading}>
 
 
           <><span style={{ fontWeight: "bold", fontSize: "20px" }} className={merriweatherSans.className}>

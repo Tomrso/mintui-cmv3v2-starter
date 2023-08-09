@@ -301,6 +301,11 @@
   dependencies:
     "@metaplex-foundation/mpl-essentials" "^0.5.8"
 
+"@metaplex-foundation/mpl-toolbox@^0.8.0":
+  version "0.8.0"
+  resolved "https://registry.yarnpkg.com/@metaplex-foundation/mpl-toolbox/-/mpl-toolbox-0.8.0.tgz#dec240563eccccfad84cf6e05b076802b252d3e1"
+  integrity sha512-SK1VUPU4hCaL3sozgtoVjjbZxqx2gWiRt0YTFbwEt5LAHWOlCb7J7rcrrA5XwymX4iV2bIWygYs0yz7hYyx2rg==
+
 "@metaplex-foundation/umi-bundle-defaults@^0.7.8":
   version "0.7.9"
   resolved "https://registry.yarnpkg.com/@metaplex-foundation/umi-bundle-defaults/-/umi-bundle-defaults-0.7.9.tgz#718c4800b9dbace7e9cfde1ec25b674412ecc365"
