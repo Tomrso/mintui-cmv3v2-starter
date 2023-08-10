@@ -3,20 +3,13 @@
 import Image from 'next/image'
 import styles from './page.module.css'
 import { Merriweather, Merriweather_Sans } from 'next/font/google';
-import {
-  fetchToken,
-  findAssociatedTokenPda,
-} from "@metaplex-foundation/mpl-toolbox";
-
 import dynamic from 'next/dynamic';
 import { useEffect, useMemo, useState } from "react";
-
 import { WalletAdapterNetwork } from "@solana/wallet-adapter-base";
 import { WalletProvider, useWallet } from "@solana/wallet-adapter-react";
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import { LedgerWalletAdapter, SolflareWalletAdapter } from "@solana/wallet-adapter-wallets";
 import "@solana/wallet-adapter-react-ui/styles.css";
-
 import { createUmi } from "@metaplex-foundation/umi-bundle-defaults";
 import {
   base58PublicKey,
@@ -50,15 +43,16 @@ import {
   GuardSet
 } from "@metaplex-foundation/mpl-candy-machine";
 import { Connection, TokenAmount, clusterApiUrl } from '@solana/web3.js';
-import { getMango } from './getMango';
+import { checkMango } from './utility/solanaSplHelpers';
+import { mintLimitChecker } from './utility/umiFunctions';
 
+//fonts
 const merriweather = Merriweather({ weight: "700", subsets: ["latin"] })
 const merriweatherSans = Merriweather_Sans({ weight: "400", subsets: ["latin"] })
 
 export default function Home() {
 
   const network = WalletAdapterNetwork.Mainnet;
-
   const endpoint = `https://${process.env.NEXT_PUBLIC_RPC_URL}`;
 
   const wallets = useMemo(
@@ -68,6 +62,7 @@ export default function Home() {
     ],
     [network]
   );
+
   const WalletMultiButtonDynamic = dynamic(
     async () =>
       (await import("@solana/wallet-adapter-react-ui")).WalletMultiButton,
@@ -80,7 +75,7 @@ export default function Home() {
     .use(mplCandyMachine());
 
   // state
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [mintCreated, setMintCreated] = useState<PublicKey | null>(null);
   const [mintMsg, setMintMsg] = useState<string>();
   const [cmv3v2, setCandyMachine] = useState<CandyMachine>();
@@ -88,8 +83,9 @@ export default function Home() {
   const [countTotal, setCountTotal] = useState<number>(0);
   const [countRemaining, setCountRemaining] = useState<number>(0);
   const [countMinted, setCountMinted] = useState<number>(0);
+  const [mintDisabled, setMintDisabled] = useState<boolean>(false)
 
-  // retrieve item counts to determine availability and
+  // check availablilty of candy machine
   const retrieveAvailability = async () => {
     const cmId = process.env.NEXT_PUBLIC_CANDY_MACHINE_ID;
     if (!cmId) {
@@ -99,74 +95,50 @@ export default function Home() {
     const candyMachine: CandyMachine = await fetchCandyMachine(umi, publicKey(cmId));
     setCandyMachine(candyMachine);
 
-    // Get counts
+    // Get counts in machine
     setCountTotal(candyMachine.itemsLoaded);
     setCountMinted(Number(candyMachine.itemsRedeemed));
     const remaining = candyMachine.itemsLoaded - Number(candyMachine.itemsRedeemed)
     setCountRemaining(remaining);
-    // Get cost
+
+    //fetch guards and set state
     const candyGuard = await safeFetchCandyGuard(umi, candyMachine.mintAuthority);
     if (candyGuard) {
       setCandyGuard(candyGuard);
     }
-  };
 
-  //Checks how many NFTs a user has minted
-  const mintLimitChecker = async (
-    umi: Umi,
-    candyMachine: CandyMachine,
-    guard: {
-      label: string;
-      guards: GuardSet;
-  }
-  ) => {
-    const mintLimit = guard.guards.mintLimit as Some<MintLimit>;
-  
-    //not minted yet
-    try {
-      const mintCounter = await safeFetchMintCounterFromSeeds(umi, {
-        id: mintLimit.value.id,
-        user: umi.identity.publicKey,
-        candyMachine: candyMachine.publicKey,
-        candyGuard: candyMachine.mintAuthority,
-      });
-  
-      if (mintCounter && mintCounter.count >= mintLimit.value.limit) {
-        return false;
-      }
-  
-      return true;
-    } catch (error) {
-      console.error(`mintLimitChecker: ${error}`);
-      return false;
+    //disable if no NFTs left
+    if (remaining <= 0) {
+      setMintMsg("Sorry, No NFTs Left!")
+      setMintDisabled(true)
+    } else {
+      setMintMsg(undefined)
+      setMintDisabled(false)
     }
+
+    //cm and page are loaded so button can now work
+    setLoading(false)
   };
 
   useEffect(() => {
     retrieveAvailability();
   }, [mintCreated]);
 
-  // Inner Mint component to handle showing the Mint button,
-  // and mint messages
+  // Inner Mint component to handle showing the Mint button and preemptively checks guards so
+  // that we don't get confusing a failed transaction
   const Mint = () => {
     const wallet = useWallet();
     umi = umi.use(walletAdapterIdentity(wallet));
 
-    // Checks mango balance
-    const checkMango = async (wallet: any) => {
-      let mango = await getMango(wallet.publicKey)
-      console.log(mango)
-      if (mango && mango >= 250) {
-        return true
-      } else {
-        return false
-      }
-    }
-
+    //ensure a wallet is connected
     if (!wallet.connected) {
       return <p>Please connect your wallet.</p>;
     }
+    
+    // Checks mango balance
+    checkMango(wallet)
 
+    //Checks that candyguard conditions are met and sets message if they're not
     const mintBtnHandler = async () => {
       if (!cmv3v2 || !candyGuard) {
         setMintMsg("There was an error fetching the candy machine. Try refreshing your browser window.");
@@ -190,12 +162,10 @@ export default function Home() {
       }
       setLoading(true);;
 
+      //The candyMachine transaction
       try {
         const candyMachine = cmv3v2;
-        console.log(candyGuard)
-
         const nftSigner = generateSigner(umi);
-
         const mintArgs: Partial<DefaultGuardSetMintArgs> = {};
 
         mintArgs.mintLimit = candyGuard.guards.mintLimit
@@ -213,7 +183,7 @@ export default function Home() {
             tokenStandard: TokenStandard.ProgrammableNonFungible
           }))
 
-
+          //send transaction
         const { signature } = await tx.sendAndConfirm(umi, {
           confirm: { commitment: "finalized" }, send: {
             skipPreflight: true,
@@ -231,6 +201,7 @@ export default function Home() {
       }
     };
 
+    //Shows token address for NFT
     if (mintCreated) {
       return (
         <a className={styles.success} target="_blank" rel="noreferrer"
@@ -245,16 +216,15 @@ export default function Home() {
 
     return (
       <>
-        <button onClick={mintBtnHandler} className={styles.mintBtn} disabled={loading}>
-
-
-          <><span style={{ fontWeight: "bold", fontSize: "20px" }} className={merriweatherSans.className}>
-            MINT
-          </span>
+        <button onClick={mintBtnHandler} className={styles.mintBtn} disabled={loading || mintDisabled}>
+          <>
+            <span style={{ fontWeight: "bold", fontSize: "20px" }} className={merriweatherSans.className}>
+              MINT
+            </span>
             <span style={{ fontWeight: "100", fontSize: "14px" }}>
               (250 MANGO)
-            </span></>
-
+            </span>
+          </>
         </button>
         {loading && (<div className={styles.loadingDots}>. . .</div>)}
       </>
