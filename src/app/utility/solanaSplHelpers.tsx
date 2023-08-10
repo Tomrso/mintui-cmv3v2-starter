@@ -20,7 +20,7 @@ export const getMango = async (owner: any) => {
 export const checkMango = async (wallet: any) => {
     let mango = await getMango(wallet.publicKey)
     console.log(mango)
-    if (mango && mango >= 500) {
+    if (mango && mango >= 250) {
       return true
     } else {
       return false

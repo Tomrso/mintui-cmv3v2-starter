@@ -222,7 +222,7 @@ export default function Home() {
               MINT
             </span>
             <span style={{ fontWeight: "100", fontSize: "14px" }}>
-              (500 MANGO)
+              (250 MANGO)
             </span>
           </>
         </button>
@@ -237,10 +237,10 @@ export default function Home() {
         <main className={styles.main}>
           <WalletMultiButtonDynamic />
           <div className={styles.headings}>
-            <h1 className={merriweather.className} style={{ padding: "20px", fontSize: "40px" }}>The Riddler Suit</h1>
-            <p className={merriweatherSans.className}>Well Well Well... You have solved another puzzle and found the riddler suit. <br></br>A wise FAPE could solve many mysteries wearing this......</p>
+            <h1 className={merriweather.className} style={{ padding: "20px", fontSize: "40px" }}>The Riddler Mask</h1>
+            <p className={merriweatherSans.className}>Congratulations brave FAPE. You have solved the puzzle and found the riddler mask. <br></br>Try it on and see what other mysteries you can solve......</p>
           </div>
-          <Image className={styles.logo} src="/riddlerSuit2.png" alt="Preview of NFTs" width={300} height={300} priority />
+          <Image className={styles.logo} src="/riddlerMask.png" alt="Preview of NFTs" width={300} height={300} priority />
 
           <div className={styles.countsContainer}>
             <div className={merriweatherSans.className}>Masks Minted: {countMinted - 1} / {countTotal - 1}</div>
